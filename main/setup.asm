@@ -1,18 +1,20 @@
 .include "constants.inc"
 .include "header.inc"
 .include "reset.inc"
+.include "ppu.inc"
+
+.segment "ZEROPAGE"
+Frame: .res 1 ; reserve 1 byte for the frame.
+Seconds: .res 1 ; reserve 1 byte for total seconds;
+BgPtr: .res 2 ; reserve 2 bytes to hold an address that we can use for a pointer
 
 ; PRG-ROM
 .segment "CODE"
-.org $8000 ; this is always where we start the PRG-ROM
+;.org $8000 ; this is always where we start the PRG-ROM
 
 .proc LoadPaletteData ; loop through your Palette data, and send it to the PPU
-    bit PPUSTATUS   ; We are using this as due to us needing to clear the 'latch' remember you only have a 8 bit register putting in a 16 bit address for address, so you have to hit it twice.  Calling bi tmakes it so that it is always beginning and good practice
-    ldx #$3F
-    stx PPUADDR
-    ldx $00
-    stx PPUADDR
-    ldx #0
+    SET_PPU_ADDRESS $3F00
+    ldx #0 ; use this as a i
 :
     lda PaletteData,x
     sta PPUDATA
@@ -20,21 +22,20 @@
     cpx #32 ; compare to 32, as that is how many colors we have in our color palette
     bne :-
     rts
+    inc Frame
+
 .endproc
 
 .proc LoadBackgroundData ; loop through your Palette data, and send it to the PPU
     bit PPUSTATUS ; Ensure the latch is correct for PPU addr
     ;We want to start on nametable1 for loading the data in, so we are starting at memory location $2000
-    ldx #$20
-    stx PPUADDR
-    ldx #$00
-    stx PPUADDR
-    ldx #0
+    SET_PPU_ADDRESS $2000
+    ldy #0 ; use this as i
 :
-    lda BackgroundData,x
+    lda (BgPtr),y ; Dereference the bgptr and then offset by y
     sta PPUDATA
-    inx
-    cpx #255
+    iny
+    cpy #255
     bne :-
     rts
 .endproc
@@ -42,10 +43,7 @@
 .proc LoadAttributeData ; loop through your Palette data, and send it to the PPU
     bit PPUSTATUS ; Ensure the latch is correct for PPU addr
     ;We want to start on nametable1 for loading the data in, so we are starting at memory location $2000
-    ldx #$23
-    stx PPUADDR
-    ldx #$C0
-    stx PPUADDR
+    SET_PPU_ADDRESS $23C0
     ldx #0
 :
     lda AttributeData,x
@@ -61,6 +59,16 @@ Reset:
     ;; Reset happens when the nes is powered on or when the reset button is hit
     ;; We are grabbig this macro, it is like a C macro where it literally just pastes in the code from the macro in here
     INIT_NES
+    ;init our zero page variables properly
+    ldx #0
+    sta Frame
+    sta Seconds
+InitializeBgPtr:
+    ;Load the low byte and then the high byte into the Bgptr memory location, due to little endian
+    ldx #< BackgroundData
+    stx BgPtr
+    ldx #> BackgroundData
+    stx BgPtr+1
 
 
 Main:
@@ -79,6 +87,14 @@ LoopForever:
     jmp LoopForever
 
 NMI:
+    inc Frame
+    ldy Frame
+    cpy #60
+    bne :+ ; if Frame is not equal to 60, just return else reset Frame to 0 and increment seconds
+    ldx #0
+    stx Frame
+    inc Seconds
+:
     rti ; return from interrupt
 
 IRQ:
@@ -112,7 +128,7 @@ AttributeData:
 ; If we are starting at FFFA, and adding 3 16 bits to it, that will end our code
 ; ABCDEF, each is 8 bits, divided by 2 for 16 bit words
 .segment "VECTORS"
-.org $FFFA
+;.org $FFFA
 ;address of the NMI handler
 ;word is a 16bit
 .word NMI
