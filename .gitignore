@@ -3,3 +3,4 @@ build/
 *.nes
 *.dbg
 
+.DS_STORE
