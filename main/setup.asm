@@ -40,46 +40,52 @@ InnerLoop:
     bne InnerLoop
 OuterLoop:
     inx
-    inc BgPtr+1
-    cpx #4
+    inc BgPtr+1 ; increment the first byte of the BgPtr by 1
+    cpx #4 ; we need to do 3 loops, so if x gets to 4, we are done.
     bne InnerLoop
     rts
 .endproc
 
 .proc WriteText
-    SET_PPU_ADDRESS $21C8
-    ldy #0 ;y is used for incrementing each letter, and we start at 0
+    ;proc is a subroutine, which means the code will jump here, and store the memory address where we came from on the stack.  We pushed the regester we were at.
+    SET_PPU_ADDRESS $21C8 ;Call to the macro to set the memory address we will draw the tile to, since an address is 16bits and registers are 8 bits, created a macro to handle the steps for conversion
+    ldy #0 ;y is used for incrementing each letter, and we start at 0.  Load this value into register y (ldy)
+    ;  # means it is a literal number, so it is 0
 Start:
-    lda Text,y ; Text is the location in memory of the FIRST LETTER in the message to write
-    beq End ; if a is equal to 0, end the loop by moving to the End label (0 means it is the end of the text)
-    cmp #$20 ; $20 in ascii is space
-    beq DrawSpace ; if we are equal to #$20, then we should jump to the label to draw a space
+    lda Text,y ; Text is the location in memory of the FIRST LETTER in the message to write, and we are offsetting by y bytes.  We are loading this into register a (lda)
+    ;we use the a register here since it is the only register that you can perform addition and subtraction on
+    beq End ; if a is equal to 0, end the loop by jumping to the End label on line 83 (strings are null terminated which is zero), else continue down (Branch if equal, beq)
+    cmp #$20 ; $20 in ascii is space (Compare the a register CMP)
+    ; $20 means that it is in hex.  #$20 means it is the literal value $20.  If we didn't have the # then it would be what is in memory location $20
+    beq DrawSpace ; if we are equal to #$20, then we should jump to the label DrawSpace
     cmp #65 ; check if it is greater than 65, which is a letter in ascii text
-    bcs DrawLetter
+    bcs DrawLetter ; jump to the label DrawLetter if we are >=65 (branch if carry is set BCS)
+
+    ; if we are not a space or a letter, then we continue down
 DrawNumber:
     ;ascii #48 is 0,$00 is 0 In the spritesheet, so we need to offset by #48 to draw the numbers.
-    sec
-    sbc #48 ; subtract 48
-    jmp EndDrawText ; jump to the EndDrawText label
+    sec ; always have to set the carry flag before subtracting (set carry, sec)
+    sbc #48 ; subtract 48 from the a register
+    jmp DrawText ; jump to the EndDrawText label
 DrawLetter:
     ;ascii #65 is A, $0A is A in the spritesheet, so we need to offset by #55
-    ; We only have uppercase letters in our sheet, so if we start at #97 (which is lowercase) we need to subtract #32
-    cmp #97 ; check to see if we are at 97 is ascii
+    ; We only have uppercase letters in our sheet, so if the letter we are drawing starts at #97 (which is lowercase) we need to subtract #32
+    cmp #97 ; check to see if a register is equal to 97
     bcc HandleLetter ; if we are <97, do not convert to uppercase and jump to HandleLetter
-    sec
+    sec ; you always need to set the carry flag before you subtract, else you get an answer that is off by one.
     sbc #32 ; subtract #32 to convert to uppercase
 HandleLetter:
     sec
     sbc #55 ; Subtract #55 as that is our sprite:ascii offset
-    jmp EndDrawText ; jump to the EndDrawText label
+    jmp DrawText ; jump to the EndDrawText label
 DrawSpace:
     lda #$24 ; $24 is the space character on the spritesheet
-EndDrawText:
-    sta PPUDATA ; Store the value in register a to draw on the screen
+DrawText:
+    sta PPUDATA ; Store the value in register a to the ppudata memory location, to draw on the screen, this automatically increments the ppumemoryaddress where it will store the next data
     iny ; increment Y so that we move to the next letter
     jmp Start ; jump back to the start
 End:
-    rts ; return from subroutine
+    rts ; return from subroutine, Pop the value from the stack so we go back to the location in memory that jumped us here.
 .endproc
 
 Reset:
@@ -102,9 +108,7 @@ Main:
     ldx #0
     jsr LoadPaletteData
     jsr LoadBackgroundData
-    ;jsr WriteText
     jsr WriteText
-    ;EnablePPURendering:
     lda #%10010000           ; Enable NMI and set background to use the 2nd pattern table (at $1000)
     sta PPUCTRL
     lda #0
@@ -180,7 +184,7 @@ AttributeData:
     .byte %11111111, %11111111, %11111111, %11111111, %11111111, %11111111, %11111111, %11111111
 
 Text:
-    .byte "Hello Melissa You num 1"
+    .byte "Yoooo bois"
 
 .segment "CHARS"
 .incbin "./chr/mario.chr"
