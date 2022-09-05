@@ -26,34 +26,61 @@ BgPtr: .res 2 ; reserve 2 bytes to hold an address that we can use for a pointer
 
 .endproc
 
-.proc LoadBackgroundData ; loop through your Palette data, and send it to the PPU
+.proc LoadBackgroundData ; loop through your Palette data, and send it to the PPU, remember a byte can only go up to 255
     bit PPUSTATUS ; Ensure the latch is correct for PPU addr
     ;We want to start on nametable1 for loading the data in, so we are starting at memory location $2000
     SET_PPU_ADDRESS $2000
-    ldy #0 ; use this as i
-:
-    lda (BgPtr),y ; Dereference the bgptr and then offset by y
+    ldx #0 ; use this as i for the outer loop
+    ldy #0 ; use this as j for the inner loop
+InnerLoop:
+    lda (BgPtr),y ; Dereference the bgptr and then offset by y (which is 00-FF)
     sta PPUDATA
     iny
-    cpy #255
-    bne :-
-    rts
-.endproc
-
-.proc LoadAttributeData ; loop through your Palette data, and send it to the PPU
-    bit PPUSTATUS ; Ensure the latch is correct for PPU addr
-    ;We want to start on nametable1 for loading the data in, so we are starting at memory location $2000
-    SET_PPU_ADDRESS $23C0
-    ldx #0
-:
-    lda AttributeData,x
-    sta PPUDATA
+    cpy #0
+    bne InnerLoop
+OuterLoop:
     inx
-    cpx #16
-    bne :-
+    inc BgPtr+1
+    cpx #4
+    bne InnerLoop
     rts
 .endproc
 
+.proc WriteText
+    SET_PPU_ADDRESS $21C8
+    ldy #0 ;y is used for incrementing each letter, and we start at 0
+Start:
+    lda Text,y ; Text is the location in memory of the FIRST LETTER in the message to write
+    beq End ; if a is equal to 0, end the loop by moving to the End label (0 means it is the end of the text)
+    cmp #$20 ; $20 in ascii is space
+    beq DrawSpace ; if we are equal to #$20, then we should jump to the label to draw a space
+    cmp #65 ; check if it is greater than 65, which is a letter in ascii text
+    bcs DrawLetter
+DrawNumber:
+    ;ascii #48 is 0,$00 is 0 In the spritesheet, so we need to offset by #48 to draw the numbers.
+    sec
+    sbc #48 ; subtract 48
+    jmp EndDrawText ; jump to the EndDrawText label
+DrawLetter:
+    ;ascii #65 is A, $0A is A in the spritesheet, so we need to offset by #55
+    ; We only have uppercase letters in our sheet, so if we start at #97 (which is lowercase) we need to subtract #32
+    cmp #97 ; check to see if we are at 97 is ascii
+    bcc HandleLetter ; if we are <97, do not convert to uppercase and jump to HandleLetter
+    sec
+    sbc #32 ; subtract #32 to convert to uppercase
+HandleLetter:
+    sec
+    sbc #55 ; Subtract #55 as that is our sprite:ascii offset
+    jmp EndDrawText ; jump to the EndDrawText label
+DrawSpace:
+    lda #$24 ; $24 is the space character on the spritesheet
+EndDrawText:
+    sta PPUDATA ; Store the value in register a to draw on the screen
+    iny ; increment Y so that we move to the next letter
+    jmp Start ; jump back to the start
+End:
+    rts ; return from subroutine
+.endproc
 
 Reset:
     ;; Reset happens when the nes is powered on or when the reset button is hit
@@ -75,12 +102,16 @@ Main:
     ldx #0
     jsr LoadPaletteData
     jsr LoadBackgroundData
-    jsr LoadAttributeData
-    ;For some reason, this needs to happen afterwards.  not enturely sure why
+    ;jsr WriteText
+    jsr WriteText
+    ;EnablePPURendering:
     lda #%10010000           ; Enable NMI and set background to use the 2nd pattern table (at $1000)
     sta PPUCTRL
-    ldx #%00011110 ;load the value for the proper ppu mask things to show the data
-    stx PPUMASK
+    lda #0
+    sta PPUSCROLL           ; Disable scroll in X
+    sta PPUSCROLL           ; Disable scroll in Y
+    lda #%00011110
+    sta PPUMASK             ; Set PPU_MASK bits to render the backgroundFor some reason, this needs to happen afterwards.  not enturely sure why
 
 
 LoopForever:
@@ -107,19 +138,49 @@ PaletteData:
 
 
 BackgroundData:
-     ;The background data that we are going to load first for testing
-    .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$36,$37,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
-    .byte $24,$24,$24,$24,$24,$24,$24,$24,$35,$25,$25,$38,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$60,$61,$62,$63,$24,$24,$24,$24
-    .byte $24,$36,$37,$24,$24,$24,$24,$24,$39,$3a,$3b,$3c,$24,$24,$24,$24,$53,$54,$24,$24,$24,$24,$24,$24,$64,$65,$66,$67,$24,$24,$24,$24
-    .byte $35,$25,$25,$38,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$55,$56,$24,$24,$24,$24,$24,$24,$68,$69,$26,$6a,$24,$24,$24,$24
-    .byte $45,$45,$45,$45,$45,$45,$45,$45,$45,$45,$45,$45,$45,$45,$45,$45,$45,$45,$45,$45,$45,$45,$45,$45,$45,$45,$45,$45,$45,$45,$45,$45
-    .byte $47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47
-    .byte $47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47
-    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+    .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
+    .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
+    .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
+    .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
+    .byte $24,$24,$24,$24,$24,$36,$37,$36,$37,$36,$37,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
+    .byte $24,$24,$24,$24,$35,$25,$25,$25,$25,$25,$25,$38,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$36,$37,$24,$24,$24,$24,$24
+    .byte $24,$24,$24,$24,$39,$3A,$3B,$3A,$3B,$3A,$3B,$3C,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$35,$25,$25,$38,$24,$24,$24,$24
+    .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$39,$3A,$3B,$3C,$24,$24,$24,$24
+    .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
+    .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
+    .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$53,$54,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
+    .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$55,$56,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
+    .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
+    .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
+    .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
+    .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
+    .byte $24,$24,$53,$54,$24,$24,$24,$24,$24,$24,$24,$24,$45,$45,$53,$54,$45,$45,$53,$54,$45,$45,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
+    .byte $24,$24,$55,$56,$24,$24,$24,$24,$24,$24,$24,$24,$47,$47,$55,$56,$47,$47,$55,$56,$47,$47,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
+    .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
+    .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
+    .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$60,$61,$62,$63,$24,$24,$24,$24
+    .byte $24,$24,$24,$24,$24,$24,$31,$32,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$64,$65,$66,$67,$24,$24,$24,$24
+    .byte $24,$24,$24,$24,$24,$30,$26,$34,$33,$24,$24,$24,$24,$36,$37,$36,$37,$24,$24,$24,$24,$24,$24,$24,$68,$69,$26,$6A,$24,$24,$24,$24
+    .byte $24,$24,$24,$24,$30,$26,$26,$26,$26,$33,$24,$24,$35,$25,$25,$25,$25,$38,$24,$24,$24,$24,$24,$24,$68,$69,$26,$6A,$24,$24,$24,$24
+    .byte $B4,$B5,$B4,$B5,$B4,$B5,$B4,$B5,$B4,$B5,$B4,$B5,$B4,$B5,$B4,$B5,$B4,$B5,$B4,$B5,$B4,$B5,$B4,$B5,$B4,$B5,$B4,$B5,$B4,$B5,$B4,$B5
+    .byte $B6,$B7,$B6,$B7,$B6,$B7,$B6,$B7,$B6,$B7,$B6,$B7,$B6,$B7,$B6,$B7,$B6,$B7,$B6,$B7,$B6,$B7,$B6,$B7,$B6,$B7,$B6,$B7,$B6,$B7,$B6,$B7
+    .byte $B4,$B5,$B4,$B5,$B4,$B5,$B4,$B5,$B4,$B5,$B4,$B5,$B4,$B5,$B4,$B5,$B4,$B5,$B4,$B5,$B4,$B5,$B4,$B5,$B4,$B5,$B4,$B5,$B4,$B5,$B4,$B6
+    .byte $B6,$B7,$B6,$B7,$B6,$B7,$B6,$B7,$B6,$B7,$B6,$B7,$B6,$B7,$B6,$B7,$B6,$B7,$B6,$B7,$B6,$B7,$B6,$B7,$B6,$B7,$B6,$B7,$B6,$B7,$B6,$B7
+    .byte $B4,$B5,$B4,$B5,$B4,$B5,$B4,$B5,$B4,$B5,$B4,$B5,$B4,$B5,$B4,$B5,$B4,$B5,$B4,$B5,$B4,$B5,$B4,$B5,$B4,$B5,$B4,$B5,$B4,$B5,$B4,$B5
+    .byte $B6,$B7,$B6,$B7,$B6,$B7,$B6,$B7,$B6,$B7,$B6,$B7,$B6,$B7,$B6,$B7,$B6,$B7,$B6,$B7,$B6,$B7,$B6,$B7,$B6,$B7,$B6,$B7,$B6,$B7,$B6,$B7    ;The background data that we are going to load first for testing
 
 AttributeData:
-    .byte %00000000, %00000000, %10101010, %00000000, %11110000, %00000000, %00000000, %00000000
+    .byte %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000
+    .byte %00000000, %10101010, %10101010, %00000000, %00000000, %00000000, %10101010, %00000000
+    .byte %00000000, %00000000, %00000000, %00000000, %11111111, %00000000, %00000000, %00000000
+    .byte %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000
+    .byte %11111111, %00000000, %00000000, %00001111, %00001111, %00000011, %00000000, %00000000
+    .byte %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000
     .byte %11111111, %11111111, %11111111, %11111111, %11111111, %11111111, %11111111, %11111111
+    .byte %11111111, %11111111, %11111111, %11111111, %11111111, %11111111, %11111111, %11111111
+
+Text:
+    .byte "Hello Melissa You num 1"
 
 .segment "CHARS"
 .incbin "./chr/mario.chr"
